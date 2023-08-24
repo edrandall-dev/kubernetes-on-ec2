@@ -1,0 +1,39 @@
+- name: Getting join command
+  hosts: ctrlplane-instance
+  tasks:
+    - name: Run Command and Register Output
+      command: kubeadm token create --print-join-command
+      register: join_command
+
+- name: Executing join command on worker nodes
+  hosts: worker_instances
+  tasks:
+    - name: Executing join command on worker nodes
+      command: "{{ hostvars[item]['join_command'].stdout }}"
+      with_inventory_hostnames:
+        - ctrlplane-instance  
+
+- name: Get config file
+  hosts: ctrlplane-instance
+  tasks:
+  - name: Create a copy of the kubectl config file which can be downloaded and used from outside
+    copy:
+      remote_src: yes
+      src: /etc/kubernetes/admin.conf
+      dest: /etc/kubernetes/admin.conf.remote
+
+  - name: Replace the private IP address with the public IP address of 
+    replace:
+      path: /etc/kubernetes/admin.conf.remote
+      regexp:  "192.168.*.*"
+      replace: "{{ ansible_ssh_host }}:6443"
+
+  - name: Fetch config file from ctrlplane-instance to ~/.kube/config
+    fetch:
+      src: /etc/kubernetes/admin.conf.remote
+      dest: ~/.kube/config
+      flat: yes
+  
+  - name: print out the new IP
+    debug:
+      msg: "{{ ansible_ssh_host }}"

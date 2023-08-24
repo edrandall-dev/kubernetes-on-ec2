@@ -1,0 +1,152 @@
+- name: Prepare Operating System
+  hosts: all
+  become: yes
+  connection: ssh
+  tasks:
+
+  - name: Set SELinux to permissive mode (right now)
+    ansible.builtin.shell: setenforce 0 
+
+  - name: Set SELinux to permissive mode (persistently)
+    selinux:
+      state: permissive
+      policy: targeted
+
+  - name: Update package cache
+    yum: update_cache=yes
+
+  - name: Upgrade all other packages
+    yum: name=* state=latest
+
+  - name: reboot all instances
+    reboot:
+
+  - name: Wait 10 seconds
+    pause:
+      seconds: 10
+
+  - name: Add kubernetes package repository (google)
+    yum_repository:
+      name: kubernetes
+      description: Google Kubernetes Repo
+      baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+      gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg 
+      gpgcheck: 1
+      enabled: 1
+
+  - name: Add docker package repository (for containerd)
+    yum_repository:
+      name: Docker
+      description: Docker Repo
+      baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+      gpgkey: https://download.docker.com/linux/centos/gpg
+      gpgcheck: 1
+      enabled: 1
+  
+  - name: Import kubernetes repo rpm package key
+    rpm_key:
+      key: https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+      state: present
+
+  - name: Update package cache
+    yum: update_cache=yes
+
+ 
+- name: Prepare all instances for Kubernetes
+  hosts: all
+  become: yes
+  connection: ssh
+  tasks: 
+
+  - name: Modules (Persistent)
+    ansible.builtin.lineinfile:
+      path: "/etc/modules-load.d/containerd.conf"
+      create: yes
+      line: |
+        overlay
+        br_netfilter
+
+  - name: install br_netfilter module
+    modprobe:
+      name: br_netfilter
+      state: present
+
+  - name: install overlay module
+    modprobe:
+      name: overlay
+      state: present
+      
+  - name: Update the /etc/hosts file with hostnames and IP addresses from each created instance
+    tags: etchostsupdate
+    become: yes
+    become_user: root
+    lineinfile:
+      dest: "/etc/hosts"
+      regexp: ".*\t{{ hostvars[item]['ansible_hostname']}}\t{{ hostvars[item]['ansible_hostname']}}"
+      line: "{{ hostvars[item]['ansible_default_ipv4']['address'] }}\t{{ hostvars[item]['ansible_hostname']}}\t{{ hostvars[item]['ansible_hostname']}}"
+      state: present
+      backup: yes
+    register: etchostsupdate
+    #when: ansible_hostname != "{{ item }}" or ansible_hostname == "{{ item }}"
+    with_items: "{{groups['all']}}"
+
+  - name: Set net.bridge.bridge-nf-call-ip6tables to 1
+    sysctl:
+      name: net.bridge.bridge-nf-call-ip6tables
+      value: 1
+      sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
+      state: present
+      sysctl_set: yes
+      reload: yes
+
+  - name: Set net.bridge.bridge-nf-call-iptables to 1
+    sysctl:
+      name: net.bridge.bridge-nf-call-iptables
+      value: 1
+      state: present
+      sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
+      sysctl_set: yes
+      reload: yes
+
+  - name: Set net.ipv4.ip_forward to 1
+    sysctl:
+      name: net.ipv4.ip_forward
+      value: 1
+      state: present
+      sysctl_file: /etc/sysctl.d/99-kubernetes-cri.conf
+      sysctl_set: yes
+      reload: yes
+
+- name: Install packages for kubernetes on all instance(s) 
+  hosts: all
+  become: yes
+  connection: ssh
+  tasks:
+
+  - name: Install packages for kubernetes on all instance(s)
+    yum: 
+      name:
+        - kubeadm
+        - kubectl
+        - kubelet 
+        - containerd
+      state: present
+  
+  - name: Generate standard config file for containerd
+    ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+
+  - name: Setting SystemdCgroup = true in config.toml
+    ansible.builtin.shell: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+  - name: Setting KUBELET_EXTRA_ARGS=--node-ip={{ ctrl_plane_private_ip }} in /etc/sysconfig/kubelet
+    shell: echo KUBELET_EXTRA_ARGS=--node-ip={{ ctrl_plane_private_ip }} > /etc/sysconfig/kubelet
+
+  - name: Enable containerd
+    service:
+      name: containerd
+      enabled: yes
+      state: stopped
+
+  - name: Playbook End - Reboot all instances
+    reboot:
+
