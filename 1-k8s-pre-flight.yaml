@@ -29,8 +29,8 @@
     yum_repository:
       name: kubernetes
       description: Google Kubernetes Repo
-      baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
-      gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg 
+      baseurl: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+      gpgkey: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
       gpgcheck: 1
       enabled: 1
 
@@ -43,10 +43,10 @@
       gpgcheck: 1
       enabled: 1
   
-  - name: Import kubernetes repo rpm package key
-    rpm_key:
-      key: https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-      state: present
+#  - name: Import kubernetes repo rpm package key
+#    rpm_key:
+#      key: https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+#      state: present
 
   - name: Update package cache
     yum: update_cache=yes
